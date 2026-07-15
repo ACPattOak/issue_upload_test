@@ -1,0 +1,45 @@
+name: Import issues from CSV
+
+on:
+  workflow_dispatch:
+    inputs:
+      csv_path:
+        description: CSV file to import
+        required: true
+        default: examples/issues.csv
+        type: string
+      dry_run:
+        description: Validate without creating issues
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: csv-issue-import
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Import issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          args=("${{ inputs.csv_path }}" --repository "${{ github.repository }}")
+          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+            args+=(--dry-run)
+          fi
+          python scripts/import_issues.py "${args[@]}"
