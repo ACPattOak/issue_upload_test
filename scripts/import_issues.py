@@ -59,21 +59,22 @@ def existing_imports(repository: str) -> dict[str, str]:
 
 def add_to_project(project_url: str, issue_url: str, token: str) -> None:
     match = re.fullmatch(
-        r"https://github\.com/(?:users|orgs)/([^/]+)/projects/(\d+)/?", project_url
+        r"https://github\.com/(users|orgs)/([^/]+)/projects/(\d+)/?", project_url
     )
     if not match:
         raise ValueError(
             "project URL must look like "
             "https://github.com/users|orgs/OWNER/projects/NUMBER"
         )
-    owner, project_number = match.groups()
+    owner_type, owner, project_number = match.groups()
+    cli_owner = "@me" if owner_type == "users" else owner
     run_gh(
         [
             "project",
             "item-add",
             project_number,
             "--owner",
-            owner,
+            cli_owner,
             "--url",
             issue_url,
         ],
