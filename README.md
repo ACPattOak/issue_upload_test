@@ -11,6 +11,7 @@ The established `gavinr/github-csv-tools` package was evaluated first. It is pur
 - The repository's automatically scoped `GITHUB_TOKEN`; no PAT is stored in this repository.
 - Sequential creation to reduce secondary-rate-limit risk.
 - Stable `external_id` markers to make reruns skip already imported rows.
+- Optional insertion into a user or organization GitHub Project.
 
 ## CSV structure
 
@@ -33,6 +34,11 @@ CSV column names are exact and case-sensitive. Unknown columns fail validation s
 3. Run once with **dry_run** enabled to validate the file.
 4. Run with **dry_run** disabled to create the issues.
 
+The optional `project_url` input overrides the repository's `PROJECT_URL`
+configuration variable. When either is populated, `PROJECT_PAT` must contain a
+token with Projects access. Existing issues are also added on a rerun, so a
+Project can be introduced after the initial CSV import.
+
 The workflow has only `contents: read` and `issues: write` permissions. Imported issue bodies contain an invisible `csv-import-id` marker; rerunning a file skips matching IDs.
 
 ## Local validation
@@ -45,4 +51,7 @@ python scripts/import_issues.py examples/issues.csv \
 
 ## Projects stretch goal
 
-Adding issues to a GitHub Project is a separate concern from issue import. GitHub maintains [`actions/add-to-project`](https://github.com/actions/add-to-project) for this. It requires a project URL and a token with Projects permissions, so it should be added as a separate `issues: opened` workflow after the basic import is accepted.
+The PoC is linked to [Issue Upload Test](https://github.com/users/ACPattOak/projects/1).
+The workflow reads that URL from the `PROJECT_URL` repository variable and uses
+the encrypted `PROJECT_PAT` Actions secret only for Project API calls. Leaving
+the URL blank keeps Project insertion disabled.

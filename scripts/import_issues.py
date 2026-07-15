@@ -7,6 +7,7 @@ import argparse
 import csv
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -17,12 +18,16 @@ OPTIONAL_COLUMNS = {"body", "labels", "assignees", "milestone", "state"}
 ALLOWED_STATES = {"open", "closed"}
 
 
-def run_gh(arguments: list[str]) -> str:
+def run_gh(arguments: list[str], token: str | None = None) -> str:
+    environment = os.environ.copy()
+    if token:
+        environment["GH_TOKEN"] = token
     completed = subprocess.run(
         ["gh", *arguments],
         check=False,
         text=True,
         capture_output=True,
+        env=environment,
     )
     if completed.returncode != 0:
         detail = completed.stderr.strip() or completed.stdout.strip()
@@ -30,7 +35,7 @@ def run_gh(arguments: list[str]) -> str:
     return completed.stdout.strip()
 
 
-def existing_import_ids(repository: str) -> set[str]:
+def existing_imports(repository: str) -> dict[str, str]:
     output = run_gh(
         [
             "api",
@@ -40,15 +45,41 @@ def existing_import_ids(repository: str) -> set[str]:
         ]
     )
     pages = json.loads(output)
-    markers: set[str] = set()
+    imports: dict[str, str] = {}
     prefix = "<!-- csv-import-id: "
     for page in pages:
         for issue in page:
             body = issue.get("body") or ""
             for line in body.splitlines():
                 if line.startswith(prefix) and line.endswith(" -->"):
-                    markers.add(line[len(prefix) : -4].strip())
-    return markers
+                    external_id = line[len(prefix) : -4].strip()
+                    imports[external_id] = issue["html_url"]
+    return imports
+
+
+def add_to_project(project_url: str, issue_url: str, token: str) -> None:
+    match = re.fullmatch(
+        r"https://github\.com/(?:users|orgs)/([^/]+)/projects/(\d+)/?", project_url
+    )
+    if not match:
+        raise ValueError(
+            "project URL must look like "
+            "https://github.com/users|orgs/OWNER/projects/NUMBER"
+        )
+    owner, project_number = match.groups()
+    run_gh(
+        [
+            "project",
+            "item-add",
+            project_number,
+            "--owner",
+            owner,
+            "--url",
+            issue_url,
+        ],
+        token=token,
+    )
+    print(f"PROJECT {issue_url}: {project_url}")
 
 
 def split_values(value: str) -> list[str]:
@@ -126,6 +157,11 @@ def main() -> int:
         help="OWNER/REPO; defaults to GITHUB_REPOSITORY",
     )
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--project-url",
+        default=os.environ.get("PROJECT_URL", ""),
+        help="optional user or organization GitHub Project URL",
+    )
     args = parser.parse_args()
 
     if not args.repository or "/" not in args.repository:
@@ -134,6 +170,9 @@ def main() -> int:
         parser.error(f"CSV file does not exist: {args.csv_path}")
     if not args.dry_run and not os.environ.get("GH_TOKEN"):
         parser.error("GH_TOKEN is required unless --dry-run is used")
+    project_token = os.environ.get("PROJECT_TOKEN", "")
+    if args.project_url and not args.dry_run and not project_token:
+        parser.error("PROJECT_TOKEN is required when --project-url is set")
 
     with args.csv_path.open(encoding="utf-8-sig", newline="") as csv_file:
         reader = csv.DictReader(csv_file)
@@ -151,7 +190,7 @@ def main() -> int:
     for row_number, row in enumerate(rows, start=2):
         validate_row(row, row_number)
 
-    known_ids = set() if args.dry_run else existing_import_ids(args.repository)
+    known_imports = {} if args.dry_run else existing_imports(args.repository)
     seen_in_file: set[str] = set()
     created = 0
     skipped = 0
@@ -162,7 +201,11 @@ def main() -> int:
             raise ValueError(f"row {row_number}: duplicate external_id {external_id!r}")
         seen_in_file.add(external_id)
 
-        if external_id in known_ids:
+        if external_id in known_imports:
+            if args.project_url:
+                add_to_project(
+                    args.project_url, known_imports[external_id], project_token
+                )
             print(f"SKIP {external_id}: already imported")
             skipped += 1
             continue
@@ -172,7 +215,9 @@ def main() -> int:
 
         issue_url = create_issue(args.repository, row)
         print(f"CREATED {external_id}: {issue_url}")
-        known_ids.add(external_id)
+        known_imports[external_id] = issue_url
+        if args.project_url:
+            add_to_project(args.project_url, issue_url, project_token)
         created += 1
 
     if args.dry_run:

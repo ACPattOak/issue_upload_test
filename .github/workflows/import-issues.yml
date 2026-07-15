@@ -13,6 +13,11 @@ on:
         required: true
         default: true
         type: boolean
+      project_url:
+        description: Optional Project URL; defaults to the PROJECT_URL repository variable
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -37,6 +42,8 @@ jobs:
       - name: Import issues
         env:
           GH_TOKEN: ${{ github.token }}
+          PROJECT_TOKEN: ${{ secrets.PROJECT_PAT }}
+          PROJECT_URL: ${{ inputs.project_url || vars.PROJECT_URL }}
         run: |
           args=("${{ inputs.csv_path }}" --repository "${{ github.repository }}")
           if [[ "${{ inputs.dry_run }}" == "true" ]]; then
