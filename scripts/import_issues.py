@@ -10,6 +10,8 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 
@@ -57,34 +59,87 @@ def existing_imports(repository: str) -> dict[str, str]:
     return imports
 
 
+def split_values(value: str) -> list[str]:
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def github_graphql(token: str, query: str, variables: dict[str, object]) -> dict:
+    request = urllib.request.Request(
+        "https://api.github.com/graphql",
+        data=json.dumps({"query": query, "variables": variables}).encode("utf-8"),
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "User-Agent": "csv-issue-import-poc",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request) as response:
+            payload = json.load(response)
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"GitHub GraphQL HTTP {error.code}: {detail}") from error
+    if payload.get("errors"):
+        messages = "; ".join(error["message"] for error in payload["errors"])
+        raise RuntimeError(f"GitHub GraphQL failed: {messages}")
+    return payload["data"]
+
+
 def add_to_project(project_url: str, issue_url: str, token: str) -> None:
-    match = re.fullmatch(
+    project_match = re.fullmatch(
         r"https://github\.com/(users|orgs)/([^/]+)/projects/(\d+)/?", project_url
     )
-    if not match:
+    if not project_match:
         raise ValueError(
             "project URL must look like "
             "https://github.com/users|orgs/OWNER/projects/NUMBER"
         )
-    owner_type, owner, project_number = match.groups()
-    cli_owner = "@me" if owner_type == "users" else owner
-    run_gh(
-        [
-            "project",
-            "item-add",
-            project_number,
-            "--owner",
-            cli_owner,
-            "--url",
-            issue_url,
-        ],
-        token=token,
+    issue_match = re.fullmatch(
+        r"https://github\.com/([^/]+)/([^/]+)/issues/(\d+)/?", issue_url
+    )
+    if not issue_match:
+        raise ValueError(f"invalid GitHub issue URL: {issue_url}")
+
+    owner_type, project_owner, project_number = project_match.groups()
+    repo_owner, repo, issue_number = issue_match.groups()
+    owner_field = "user" if owner_type == "users" else "organization"
+    lookup = github_graphql(
+        token,
+        f"""
+        query($projectOwner: String!, $projectNumber: Int!, $repoOwner: String!,
+              $repo: String!, $issueNumber: Int!) {{
+          projectOwner: {owner_field}(login: $projectOwner) {{
+            projectV2(number: $projectNumber) {{ id }}
+          }}
+          repository(owner: $repoOwner, name: $repo) {{
+            issue(number: $issueNumber) {{ id }}
+          }}
+        }}
+        """,
+        {
+            "projectOwner": project_owner,
+            "projectNumber": int(project_number),
+            "repoOwner": repo_owner,
+            "repo": repo,
+            "issueNumber": int(issue_number),
+        },
+    )
+    project_id = lookup["projectOwner"]["projectV2"]["id"]
+    issue_id = lookup["repository"]["issue"]["id"]
+    github_graphql(
+        token,
+        """
+        mutation($projectId: ID!, $contentId: ID!) {
+          addProjectV2ItemById(input: {projectId: $projectId, contentId: $contentId}) {
+            item { id }
+          }
+        }
+        """,
+        {"projectId": project_id, "contentId": issue_id},
     )
     print(f"PROJECT {issue_url}: {project_url}")
-
-
-def split_values(value: str) -> list[str]:
-    return [part.strip() for part in value.split(",") if part.strip()]
 
 
 def validate_row(row: dict[str, str], row_number: int) -> None:
