@@ -1,6 +1,11 @@
 name: Import issues from CSV
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - examples/issues.csv
   workflow_dispatch:
     inputs:
       csv_path:
@@ -41,12 +46,14 @@ jobs:
 
       - name: Import issues
         env:
+          CSV_PATH: ${{ inputs.csv_path || 'examples/issues.csv' }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
           GH_TOKEN: ${{ github.token }}
           PROJECT_TOKEN: ${{ secrets.PROJECT_PAT }}
           PROJECT_URL: ${{ inputs.project_url || vars.PROJECT_URL }}
         run: |
-          args=("${{ inputs.csv_path }}" --repository "${{ github.repository }}")
-          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+          args=("$CSV_PATH" --repository "${{ github.repository }}")
+          if [[ "$DRY_RUN" == "true" ]]; then
             args+=(--dry-run)
           fi
           python scripts/import_issues.py "${args[@]}"
