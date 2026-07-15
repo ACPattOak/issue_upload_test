@@ -9,3 +9,5 @@ POC-002,Add CSV validation summary,"Show the number of valid, skipped, and rejec
 POC-003,"Document commas, quotes, and multiline fields","Add examples showing a comma, such as London, UK, and an escaped quote: ""ready"".",documentation,,,open
 POC-004,Clarify ownership when an assignee is unavailable,"What should happen when a CSV names somebody who cannot be assigned to the repository?",question,,,open
 POC-005,Retire the legacy spreadsheet template,"The old template has been replaced by the versioned schema in this repository. Unicode check: café ✓",documentation,,,closed
+TES-26,ThisIsATest,"The old template has been replaced by the versioned schema in this repository. Unicode check: café ✓",documentation,,,closed
+POC-006,ThisIsATest,"The old template has been replaced by the versioned schema in this repository. Unicode check: café ✓",documentation,,,closed
